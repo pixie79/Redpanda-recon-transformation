@@ -1,0 +1,8 @@
+name: 10x-recon
+input-topic: "10x-client-general-ledger-posting-event-v002"
+output-topic: "10x-recon-metadata"
+language: tinygo
+env: {
+  INPUT_TOPIC: "10x-client-general-ledger-posting-event-v002",
+  DESTINATION_SCHEMA_ID: 1
+}

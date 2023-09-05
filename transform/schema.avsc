@@ -1,0 +1,10 @@
+{
+    "type": "record",
+    "name": "10x-event-history",
+    "namespace": "com.example",
+    "fields" : [
+        {"name": "topic", "type": "string"},
+        {"name": "message_key", "type": "string"},
+        {"name": "outbox_published_date", "type": "long"}
+    ]
+}
