@@ -1,8 +1,10 @@
-name: 10x-recon
-input-topic: "10x-client-general-ledger-posting-event-v002"
-output-topic: "10x-recon-metadata"
+name: recon_feed
+input-topic: "client-general-ledger-posting-event-v002"
+output-topic: "recon-metadata"
 language: tinygo
 env: {
-  INPUT_TOPIC: "10x-client-general-ledger-posting-event-v002",
+  INPUT_TOPIC: "client-general-ledger-posting-event-v002",
+  TOPIC_PREFIX: "client-",
   DESTINATION_SCHEMA_ID: 1
+
 }
