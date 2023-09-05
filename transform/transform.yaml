@@ -6,5 +6,4 @@ env: {
   INPUT_TOPIC: "client-general-ledger-posting-event-v002",
   TOPIC_PREFIX: "client-",
   DESTINATION_SCHEMA_ID: 1
-
 }

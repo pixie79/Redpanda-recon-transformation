@@ -1,4 +1,4 @@
-module 10x-recon
+module recon-transformation
 
 go 1.20
 
@@ -6,6 +6,7 @@ require (
 	github.com/hamba/avro/v2 v2.15.1
 	github.com/joho/godotenv v1.5.1
 	github.com/linkedin/goavro/v2 v2.12.0
+	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/redpanda-data/redpanda/src/go/transform-sdk v0.0.0-20230830212037-604fcce29485
 	golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63
 )
