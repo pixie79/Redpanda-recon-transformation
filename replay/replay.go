@@ -28,6 +28,7 @@ var (
 	// purges expired items every 10 minutes
 	schemaCache = cache.New(2*time.Hour, 10*time.Minute)
 	schemaID    string
+	schemaIdInt int
 	seedEnv     string
 	topic       string
 )
@@ -35,6 +36,7 @@ var (
 func init() {
 	var (
 		set bool
+		err error
 	)
 
 	flag.Parse()
@@ -59,6 +61,9 @@ func init() {
 	if !set {
 		die("", "SCHEMA_ID environment variable not set")
 	}
+	schemaIdInt, err = strconv.Atoi(schemaID)
+	maybeDie(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", schemaID))
+
 	seedEnv, set = os.LookupEnv("KAFKA_SEEDS")
 	if !set {
 		die("", "KAFKA_SEEDS environment variable not set")
@@ -97,7 +102,7 @@ func maybeDie(err error, msg string, args ...any) {
 	}
 }
 
-func getSchema(id string) *avro.Codec {
+func getSchema(id string, idInt int) *avro.Codec {
 	const schemaURL = "http://localhost:18081"
 	schema, found := schemaCache.Get(id)
 	if found {
@@ -108,9 +113,8 @@ func getSchema(id string) *avro.Codec {
 
 	registry, err := sr.NewClient(schemaURL)
 	maybeDie(err, fmt.Sprintf("Cannot connect to Schema Registry: %+v", err))
-	schemaIdInt, err := strconv.Atoi(id)
 	maybeDie(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", id))
-	remoteSchema, err := registry.GetSchemaByID(schemaIdInt)
+	remoteSchema, err := registry.GetSchemaByID(idInt)
 	maybeDie(err, fmt.Sprintf("Unable to retrieve schema for ID: %s", id))
 	logger.Debug(fmt.Sprintf("Schema: %s", remoteSchema))
 
@@ -122,8 +126,10 @@ func getSchema(id string) *avro.Codec {
 }
 
 func main() {
-	codec := getSchema(schemaID)
+	codec := getSchema(schemaID, schemaIdInt)
 
+	schemaIdBytes := seqToBuffer(schemaIdInt)
+	logger.Info(fmt.Sprintf("Schema ID: %s", schemaIdBytes))
 	// Read data file
 	dataFile, err := os.ReadFile(*fileName)
 	maybeDie(err, fmt.Sprintf("Error reading file: %+v", err))
@@ -154,11 +160,15 @@ func main() {
 		encoded, err := codec.BinaryFromNative(nil, record)
 		maybeDie(err, fmt.Sprintf("Unable to encode map: %+v", err))
 
+		encodedValue := [][]byte{schemaIdBytes, encoded}
+
+		// Create avro record
 		avroRecord := &kgo.Record{
 			Key:   []byte(messageKey),
-			Value: encoded,
+			Value: bytes.Join(encodedValue, nil),
 			Topic: topic,
 		}
+		logger.Info(fmt.Sprintf("Avro Record: %+v", avroRecord))
 		avroRecords = append(avroRecords, avroRecord)
 	}
 
@@ -167,6 +177,16 @@ func main() {
 	err = SubmitRecords(context.Background(), client, avroRecords)
 	maybeDie(err, "Error submitting records")
 
+}
+
+func seqToBuffer(seq int) []byte {
+	buf := make([]byte, 5)
+	for i := len(buf) - 1; seq != 0; i-- {
+		buf[i] = byte(seq & 0xff)
+		seq >>= 5
+	}
+	logger.Info(fmt.Sprintf("Buffer: %s", buf))
+	return buf
 }
 
 func getMessageKey(nestedMap map[string]interface{}) (messageKey string, ok bool) {
