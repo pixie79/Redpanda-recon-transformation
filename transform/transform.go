@@ -3,16 +3,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/joho/godotenv"
-	"github.com/patrickmn/go-cache"
-	"golang.org/x/exp/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+	"github.com/patrickmn/go-cache"
+	"golang.org/x/exp/slog"
+
 	avro "github.com/linkedin/goavro/v2"
-	"github.com/redpanda-data/redpanda/src/go/transform-sdk"
+	redpanda "github.com/redpanda-data/redpanda/src/go/transform-sdk"
 	sr "github.com/redpanda-data/redpanda/src/go/transform-sdk/sr"
 )
 
@@ -133,7 +134,7 @@ func getSchema(id string) *avro.Codec {
 
 	registry := sr.NewClient()
 	schemaIdInt, err := strconv.Atoi(id)
-	maybeDie(err, fmt.Sprintf("DESTINATION_SCHEMA_ID not an integer: %s", id))
+	maybeDie(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", id))
 	remoteSchema, err := registry.LookupSchemaById(schemaIdInt)
 	maybeDie(err, fmt.Sprintf("Unable to retrieve schema for ID: %s", id))
 	logger.Debug(fmt.Sprintf("Schema: %s", remoteSchema.Schema))
