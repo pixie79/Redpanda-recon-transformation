@@ -1,6 +1,6 @@
 {
     "type": "record",
-    "name": "10x-event-history",
+    "name": "recon",
     "namespace": "com.example",
     "fields" : [
         {"name": "topic", "type": "string"},
