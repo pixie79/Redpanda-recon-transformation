@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,9 +25,11 @@ var (
 	// Create a cache with a default expiration time of 5 minutes, and which
 	// purges expired items every 10 minutes
 	// schemaCache         = cache.New(2*time.Hour, 10*time.Minute)
-	inputTopicStripped  string
-	destinationSchemaID string
-	sd                  sr.Serde[*destinationRecordValue]
+	inputTopicStripped     string
+	destinationCodec       *avro.Codec
+	destinationSchemaID    string
+	destinationSchemaIDInt int
+	sd                     sr.Serde[*destinationRecordValue]
 )
 
 type destinationRecordValue struct {
@@ -47,6 +50,7 @@ func init() {
 		inputTopic  string
 		set         bool
 		topicPrefix string
+		err         error
 	)
 
 	logLevel, set = os.LookupEnv("LOG_LEVEL")
@@ -65,7 +69,7 @@ func init() {
 	if !set {
 		die("DESTINATION_SCHEMA_ID environment variable not set")
 	}
-	destinationSchemaIdInt, err := strconv.Atoi(destinationSchemaID)
+	destinationSchemaIDInt, err = strconv.Atoi(destinationSchemaID)
 	maybeDie(err, fmt.Sprintf("DESTINATION_SCHEMA_ID not an integer: %s", destinationSchemaID))
 
 	topicPrefix, set = os.LookupEnv("TOPIC_PREFIX")
@@ -76,21 +80,11 @@ func init() {
 		inputTopicStripped = strings.TrimPrefix(inputTopic, topicPrefix)
 	}
 
+	logger.Info(fmt.Sprintf("Input Topic Stripped: %s", inputTopicStripped))
 	destinationSchema := getSchema(destinationSchemaID)
-	destinationCodec, err := avro.NewCodec(destinationSchema.Schema)
+	destinationCodec, err = avro.NewCodec(destinationSchema.Schema)
 	maybeDie(err, "Error creating Avro codec")
-	logger.Info(fmt.Sprintf("Destination Schema: %s %d ", destinationSchemaID, destinationSchemaIdInt))
-
-	sd.Register(
-		destinationSchemaIdInt,
-		sr.EncodeFn[*destinationRecordValue](func(e *destinationRecordValue) ([]byte, error) {
-			return destinationCodec.BinaryFromNative(nil, map[string]interface{}{
-				"topic":                 inputTopicStripped,
-				"message_key":           e.MessageKey,
-				"outbox_published_date": e.OutboxPublishedDate,
-			})
-		}),
-	)
+	logger.Info(fmt.Sprintf("Destination Schema: %s %d ", destinationSchemaID, destinationSchemaIDInt))
 }
 
 func initLog() *slog.Logger {
@@ -188,16 +182,20 @@ func doTransform(e redpanda.WriteEvent) []byte {
 		panic("Unable to get message key")
 	}
 
-	record := &destinationRecordValue{
-		Topic:               inputTopicStripped,
-		MessageKey:          messageKey,
-		OutboxPublishedDate: outboxPublishedDate,
-	}
+	encodedBuffer := addZeroToStart(intToBytes(destinationSchemaIDInt))
 
-	encoded, err := sd.Encode(record)
+	logger.Info(fmt.Sprintf("ID: %d", destinationSchemaIDInt))
+	logger.Info("**************************************************")
+	logger.Info(fmt.Sprintf("Encoded Buffer: %v", encodedBuffer))
+	encoded, err := destinationCodec.BinaryFromNative(nil, map[string]interface{}{
+		"topic":                 inputTopicStripped,
+		"message_key":           messageKey,
+		"outbox_published_date": outboxPublishedDate,
+	})
 	maybeDie(err, "Unable to encode map")
-
-	return encoded
+	data := append(encodedBuffer, encoded...)
+	logger.Info(fmt.Sprintf("Data: %v", data))
+	return append(data)
 }
 
 // toAvro transforms a redpanda.WriteEvent into a slice of redpanda.Record objects.
@@ -234,7 +232,6 @@ func getValues(nestedMap map[string]interface{}) (messageKey string, outboxPubli
 		if ok {
 			if key == "metadata" {
 				messageKey = m["message_key"].(string)
-				logger.Info(fmt.Sprintf("Key Type: %T", m["outbox_published_date"]))
 				outboxPublishedDateTime = m["outbox_published_date"].(time.Time)
 				return messageKey, outboxPublishedDateTime.UnixMicro(), true
 			}
@@ -292,4 +289,14 @@ func decodeAvro(schema string, event []byte) map[string]interface{} {
 
 	return nestedMap
 
+}
+
+func intToBytes(n int) []byte {
+	byteArray := make([]byte, 4)
+	binary.BigEndian.PutUint32(byteArray, uint32(n))
+	return byteArray
+}
+
+func addZeroToStart(byteArray []byte) []byte {
+	return append([]byte{0}, byteArray...)
 }
