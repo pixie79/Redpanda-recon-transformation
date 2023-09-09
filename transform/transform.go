@@ -1,5 +1,11 @@
 package main
 
+// Register schema:
+// jq '. | {schema: tojson}' schema.avsc | \
+// 	curl -X POST "http://localhost:58646/subjects/10x_event_history_avro-value/versions" \
+// 	-H "Content-Type: application/vnd.schemaregistry.v1+json" \
+// 	-d @-
+	
 import (
 	"encoding/base64"
 	"encoding/binary"
@@ -10,18 +16,16 @@ import (
 	"strings"
 	"time"
 
-	// "github.com/patrickmn/go-cache"
-
 	"golang.org/x/exp/slog"
 
 	avro "github.com/linkedin/goavro/v2"
 	redpanda "github.com/redpanda-data/redpanda/src/go/transform-sdk"
 	sr "github.com/redpanda-data/redpanda/src/go/transform-sdk/sr"
+	kafka "github.com/pixie79/data-utils/kafka"
+	utils "github.com/pixie79/data-utils/utils"
 )
 
 var (
-	logger   *slog.Logger
-	logLevel string
 	// Create a cache with a default expiration time of 5 minutes, and which
 	// purges expired items every 10 minutes
 	// schemaCache         = cache.New(2*time.Hour, 10*time.Minute)
@@ -41,7 +45,7 @@ type destinationRecordValue struct {
 // init initializes the application.
 //
 // This function sets up the necessary environment variables and configuration
-// for the application to run. It initializes the logger, retrieves the
+// for the application to run. It initializes the utils.Logger, retrieves the
 // required input topic and destination schema ID from the environment
 // variables, and performs necessary validations. It also registers the
 // destination schema and encodes the destination record values.
@@ -53,71 +57,33 @@ func init() {
 		err         error
 	)
 
-	logLevel, set = os.LookupEnv("LOG_LEVEL")
-	if !set {
-		logLevel = "INFO"
-	}
-
-	logger = initLog()
-
 	inputTopic, set = os.LookupEnv("INPUT_TOPIC")
 	if !set {
-		die("INPUT_TOPIC environment variable not set")
+		utils.Die("INPUT_TOPIC environment variable not set")
 	}
 
 	destinationSchemaID, set = os.LookupEnv("DESTINATION_SCHEMA_ID")
 	if !set {
-		die("DESTINATION_SCHEMA_ID environment variable not set")
+		utils.Die("DESTINATION_SCHEMA_ID environment variable not set")
 	}
 	destinationSchemaIDInt, err = strconv.Atoi(destinationSchemaID)
-	maybeDie(err, fmt.Sprintf("DESTINATION_SCHEMA_ID not an integer: %s", destinationSchemaID))
+	utils.MaybeDie(err, fmt.Sprintf("DESTINATION_SCHEMA_ID not an integer: %s", destinationSchemaID))
 
 	topicPrefix, set = os.LookupEnv("TOPIC_PREFIX")
 	if !set {
-		logger.Debug("TOPIC_PREFIX environment variable not set - not stripping prefix")
+		utils.Logger.Debug("TOPIC_PREFIX environment variable not set - not stripping prefix")
 		inputTopicStripped = inputTopic
 	} else {
 		inputTopicStripped = strings.TrimPrefix(inputTopic, topicPrefix)
 	}
 
-	logger.Info(fmt.Sprintf("Input Topic Stripped: %s", inputTopicStripped))
-	destinationSchema := getSchema(destinationSchemaID)
-	destinationCodec, err = avro.NewCodec(destinationSchema.Schema)
-	maybeDie(err, "Error creating Avro codec")
-	logger.Info(fmt.Sprintf("Destination Schema: %s %d ", destinationSchemaID, destinationSchemaIDInt))
+	utils.Logger.Info(fmt.Sprintf("Input Topic Stripped: %s", inputTopicStripped))
+	destinationSchema := kafka.GetSchema(destinationSchemaID)
+	destinationCodec, err = avro.NewCodec(destinationSchema)
+	utils.MaybeDie(err, "Error creating Avro codec")
+	utils.Logger.Info(fmt.Sprintf("Destination Schema: %s %d ", destinationSchemaID, destinationSchemaIDInt))
 }
 
-func initLog() *slog.Logger {
-	switch logLevel {
-	case "DEBUG":
-		opts := &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		}
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, opts))
-		logger.Info(fmt.Sprintf("Loglevel set to: %s", logLevel))
-		slog.SetDefault(logger)
-		return logger
-	default:
-		opts := &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, opts))
-		logger.Info(fmt.Sprintf("Loglevel set to: %s", logLevel))
-		slog.SetDefault(logger)
-		return logger
-	}
-}
-
-func die(msg string) {
-	logger.Error(msg)
-	os.Exit(1)
-}
-
-func maybeDie(err error, msg string) {
-	if err != nil {
-		die(fmt.Sprintf("%s: %+v", msg, err))
-	}
-}
 
 // main is the entry point of the program.
 //
@@ -125,88 +91,45 @@ func maybeDie(err error, msg string) {
 // It does not have any parameters.
 // It does not return any values.
 func main() {
-	// Register schema:
-	// jq '. | {schema: tojson}' schema.avsc | \
-	// 	curl -X POST "http://localhost:58646/subjects/10x_event_history_avro-value/versions" \
-	// 	-H "Content-Type: application/vnd.schemaregistry.v1+json" \
-	// 	-d @-
-	// Register your transform function.
-	// This is a good place to perform other setup too.
-	// Create Avro codec to use in transform function
-	logger.Info("Running transformer")
+	utils.Logger.Info("Running transformer")
 	redpanda.OnRecordWritten(toAvro)
 }
 
-// getSchema retrieves the schema with the given ID.
-//
-// Parameters:
-// - id: the ID of the schema to retrieve.
-//
-// Returns:
-// - *sr.Schema: the retrieved schema.
-func getSchema(id string) *sr.Schema {
-	// schemaCache := cache.New(2*time.Hour, 10*time.Minute)
-	// schema, found := schemaCache.Get(id)
-	// if found {
-	// 	codec, err := avro.NewCodec(schema.(string))
-	// 	maybeDie(err, fmt.Sprintf("Error creating Avro codec: %+v", err))
-	// 	return codec
-	// }
-
-	registry := sr.NewClient()
-	schemaIdInt, err := strconv.Atoi(id)
-	logger.Debug(fmt.Sprintf("Schema ID: %s", id))
-	maybeDie(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", id))
-	schema, err := registry.LookupSchemaById(schemaIdInt)
-	maybeDie(err, fmt.Sprintf("Unable to retrieve schema for ID: %s", id))
-	// schemaCache.Set(id, schema.Schema, cache.DefaultExpiration)
-	return schema
-}
-
-// doTransform is where you read the record that was written, and then you can
-// return new records that will be written to the output topic
-func doTransform(e redpanda.WriteEvent) []byte {
+func toAvro(e redpanda.WriteEvent) ([]redpanda.Record, error) {
 	rawEvent, err := json.Marshal(e.Record().Value)
-	maybeDie(err, "unable to parse raw event")
-	logger.Debug(fmt.Sprintf("Raw Event %s", rawEvent))
+	utils.MaybeDie(err, "unable to parse raw event")
+	utils.Logger.Debug(fmt.Sprintf("Raw Event %s", rawEvent))
 
 	sourceSchemaID, err := sr.ExtractID(e.Record().Value)
-	maybeDie(err, fmt.Sprintf("Unable to retrieve schema for id: %d", sourceSchemaID))
+	utils.MaybeDie(err, fmt.Sprintf("Unable to retrieve schema for id: %d", sourceSchemaID))
 
-	sourceSchema := *getSchema(fmt.Sprintf("%d", sourceSchemaID))
-	nestedMap := decodeAvro(sourceSchema.Schema, rawEvent)
+	sourceSchema := *kafka.GetSchema(fmt.Sprintf("%d", sourceSchemaID))
+	nestedMap := kafka.DecodeAvro(sourceSchema, rawEvent)
 
 	messageKey, outboxPublishedDate, ok := getValues(nestedMap)
 	if !ok {
-		logger.Error("Unable to get message key")
-		panic("Unable to get message key")
+		utils.Die("Unable to get message key")
 	}
 
-	encodedBuffer := addZeroToStart(intToBytes(destinationSchemaIDInt))
+	encodedBuffer := Utils.EncodedBuffer(destinationSchemaIDInt)
 
-	logger.Info(fmt.Sprintf("ID: %d", destinationSchemaIDInt))
-	logger.Info("**************************************************")
-	logger.Info(fmt.Sprintf("Encoded Buffer: %v", encodedBuffer))
+	utils.Logger.Info(fmt.Sprintf("ID: %d", destinationSchemaIDInt))
+	utils.Logger.Info("**************************************************")
+	utils.Logger.Info(fmt.Sprintf("Encoded Buffer: %v", encodedBuffer))
 	encoded, err := destinationCodec.BinaryFromNative(nil, map[string]interface{}{
 		"topic":                 inputTopicStripped,
 		"message_key":           messageKey,
 		"outbox_published_date": outboxPublishedDate,
 	})
-	maybeDie(err, "Unable to encode map")
+	utils.MaybeDie(err, "Unable to encode map")
 	data := append(encodedBuffer, encoded...)
-	logger.Info(fmt.Sprintf("Data: %v", data))
-	return append(data)
-}
+	utils.Logger.Info(fmt.Sprintf("Data: %v", data))
 
-// toAvro transforms a redpanda.WriteEvent into a slice of redpanda.Record objects.
-//
-// It takes a redpanda.WriteEvent as a parameter and returns a slice of redpanda.Record objects or error.
-func toAvro(event redpanda.WriteEvent) ([]redpanda.Record, error) {
-	encodedValue := doTransform(event)
 	record := redpanda.Record{
 		Key:   event.Record().Key,
-		Value: encodedValue,
+		Value: append(data),
 	}
+
 	return []redpanda.Record{record}, nil
 }
 
@@ -238,65 +161,4 @@ func getValues(nestedMap map[string]interface{}) (messageKey string, outboxPubli
 		}
 	}
 	return "", -1, false
-}
-
-// B64DecodeMsg decodes a base64 encoded key and returns a subset of the key starting from the specified offset.
-//
-// Parameters:
-//   - b64Key: The base64 encoded key to be decoded.
-//   - offsetF: An optional integer representing the offset from which to start the subset of the key. If not provided, it defaults to 7.
-//
-// Returns:
-//   - []byte: The subset of the key starting from the specified offset.
-//   - error: An error if the decoding or subset operation fails.
-func B64DecodeMsg(b64Key string, offsetF ...int) ([]byte, error) {
-	offset := 7
-	if len(offsetF) > 0 {
-		offset = offsetF[0]
-	}
-
-	key, err := base64.StdEncoding.DecodeString(b64Key)
-	if err != nil {
-		return nil, err
-	}
-
-	result := key[offset:]
-	return result, nil
-}
-
-// decodeAvro decodes an Avro event using the provided schema and returns a nested map[string]interface{}.
-//
-// Parameters:
-// - schema: The Avro schema used for decoding the event (string).
-// - event: The Avro event to be decoded ([]byte).
-//
-// Returns:
-// - nestedMap: The decoded event as a nested map[string]interface{}.
-func decodeAvro(schema string, event []byte) map[string]interface{} {
-	sourceCodec, err := avro.NewCodec(schema)
-	maybeDie(err, "Error creating Avro codec")
-
-	strEvent := strings.Replace(string(event), "\"", "", -1)
-	newEvent, err := B64DecodeMsg(strEvent, 5)
-	maybeDie(err, "Error decoding base64")
-	native, _, err := sourceCodec.NativeFromBinary(newEvent)
-	maybeDie(err, "Error creating native from binary")
-	// logger.Debug(prettyPrint(native))
-	nestedMap, ok := native.(map[string]interface{})
-	if !ok {
-		die("Unable to convert native to map[string]interface{}")
-	}
-
-	return nestedMap
-
-}
-
-func intToBytes(n int) []byte {
-	byteArray := make([]byte, 4)
-	binary.BigEndian.PutUint32(byteArray, uint32(n))
-	return byteArray
-}
-
-func addZeroToStart(byteArray []byte) []byte {
-	return append([]byte{0}, byteArray...)
 }
