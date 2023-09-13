@@ -1,0 +1,6 @@
+github.com/pixie79/data-utils v0.0.17 h1:PIgPIs9y8qHOnnyFRyqlg4PiVOvuZnd7eab2NHJ0IFA=
+github.com/pixie79/data-utils v0.0.17/go.mod h1:DmrOqUzHyKMpYBSPjQL+jgyW5ja2DXbloPxBa2y8uXg=
+github.com/pixie79/data-utils v0.0.21 h1:TCFT7tei5per0MjV4FRcFoCHjxExnjKHbtXYsZdVb64=
+github.com/pixie79/data-utils v0.0.21/go.mod h1:+N1spI44yhBKxouSSKWri9lC7Zg67dgPfiM1GIiAHOk=
+github.com/stretchr/objx v0.4.0 h1:M2gUjqZET1qApGOWNSnZ49BAIMX4F/1plDv3+l31EJ4=
+golang.org/x/mod v0.12.0/go.mod h1:iBbtSCu2XBx23ZKBPSOrRkjjQPZFPuis4dIYUhu/chs=

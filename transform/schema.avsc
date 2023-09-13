@@ -5,6 +5,10 @@
     "fields" : [
         {"name": "topic", "type": "string"},
         {"name": "message_key", "type": "string"},
-        {"name": "outbox_published_date", "type": "long"}
+        {"name": "outbox_published_date", "type" : {
+            "type" : "long",
+            "logicalType" : "timestamp-micros"
+            }
+        }
     ]
 }
