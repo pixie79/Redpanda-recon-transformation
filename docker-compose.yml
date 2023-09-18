@@ -1,5 +1,5 @@
 version: '3.7'
-name: redpanda-owl-shop
+name: redpanda
 networks:
   redpanda_network:
     driver: bridge
@@ -18,10 +18,10 @@ services:
       # from inside the same Docker network.
       # Use the external addresses to connect to the Redpanda brokers
       # from outside the Docker network.
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://redpanda:19092
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
       # Address the broker advertises to clients that connect to the HTTP Proxy.
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://redpanda:18082
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       # Redpanda brokers use the RPC API to communicate with each other internally.
       - --rpc-addr redpanda:33145
@@ -117,7 +117,7 @@ services:
       CONNECT_HEAP_OPTS: -Xms512M -Xmx512M
       CONNECT_LOG_LEVEL: info
   jobmanager:
-    build: .
+    build: ./flink/
     hostname: jobmanager    
     container_name: jobmanager
     ports:
@@ -125,8 +125,10 @@ services:
       - "9249:9249"
     command: jobmanager
     volumes:
-      - ./jars/:/opt/flink/jars
-      - ./logs/flink/jm:/opt/flink/temp
+      - ./flink/jars/:/opt/flink/jars
+      - ./flink/logs/flink/jm:/opt/flink/temp
+    networks:
+      - redpanda_network
     environment:
       - |
         FLINK_PROPERTIES=
@@ -154,15 +156,17 @@ services:
         state.backend.rocksdb.metrics.num-entries-active-mem-table: true
         state.backend.rocksdb.metrics.num-deletes-imm-mem-tables: true
   taskmanager1:
-    build: .
+    build: ./flink/
     container_name: taskmanager1
     depends_on:
       - jobmanager
     command: taskmanager
     ports:
       - "9250:9249"
+    networks:
+      - redpanda_network
     volumes:
-      - ./logs/flink/tm1:/opt/flink/temp
+      - ./flink/logs/flink/tm1:/opt/flink/temp
     environment:
       - |
         FLINK_PROPERTIES=
@@ -191,15 +195,17 @@ services:
         state.backend.rocksdb.metrics.num-entries-active-mem-table: true
         state.backend.rocksdb.metrics.num-deletes-imm-mem-tables: true
   taskmanager2:
-    build: .
+    build: ./flink/
     container_name: taskmanager2
     depends_on:
       - jobmanager
     command: taskmanager
     ports:
       - "9251:9249"
+    networks:
+      - redpanda_network
     volumes:
-      - ./logs/flink/tm2:/opt/flink/temp
+      - ./flink/logs/flink/tm2:/opt/flink/temp
     environment:
       - |
         FLINK_PROPERTIES=
@@ -236,6 +242,8 @@ services:
       - POSTGRES_PASSWORD=postgres
     ports:
       - '5432:5432'
+    networks:
+      - redpanda_network
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -243,18 +251,43 @@ services:
       - '--config.file=/etc/prometheus/config.yaml'
     ports:
       - "9090:9090"
+    networks:
+      - redpanda_network
     volumes:
-      - ./prometheus:/etc/prometheus
+      - ./flink/prometheus:/etc/prometheus
   #      - ./prom_data:/prometheus
   grafana:
     image: grafana/grafana
     container_name: grafana
     ports:
       - "3000:3000"
+    networks:
+      - redpanda_network
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=grafana
       - GF_SECURITY_ADMIN_PASSWORD=grafana
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./flink/grafana/provisioning:/etc/grafana/provisioning
+      - ./flink/grafana/dashboards:/var/lib/grafana/dashboards
+  replay:
+    build: ./go/replay/
+    container_name: replay
+    networks:
+      - redpanda_network
+    environment:
+      - TOPIC=10x-client-general-ledger-posting-event-v002
+      - SCHEMA_ID=25
+      - LOG_LEVEL=INFO
+      - KAFKA_SEEDS=redpanda:19092
+      - SCHEMA_REGISTRY=redpanda:18081
+    volumes:
+      - ~/S3:/S3
+  schemas:
+    build: ./schema_migration/
+    container_name: schemas
+    networks:
+      - redpanda_network
+    volumes:
+      - ./schema_migration/conf:/app/conf
+      - ./schema_migration/data:/app/data

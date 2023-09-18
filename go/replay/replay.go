@@ -22,9 +22,8 @@ var (
 	destinationSchemaID    string
 	destinationSchemaIDInt int
 	destinationTopic       string
+	schemaURL              string
 )
-
-const schemaURL = "http://localhost:18081"
 
 func init() {
 	var (
@@ -44,6 +43,8 @@ func init() {
 
 	destinationSchemaIDInt, err = strconv.Atoi(destinationSchemaID)
 	tuUtils.MaybeDie(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", destinationSchemaID))
+
+	schemaURL = tuUtils.GetEnvOrDie("SCHEMA_REGISTRY")
 }
 
 func main() {

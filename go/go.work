@@ -3,6 +3,5 @@ go 1.21.0
 use (
 	./replay
 	./review
-	./test
 	./transform
 )
