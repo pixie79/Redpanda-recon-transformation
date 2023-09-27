@@ -1,0 +1,4 @@
+fastavro
+requests
+kafka-python
+pyyaml

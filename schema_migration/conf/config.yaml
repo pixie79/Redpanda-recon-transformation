@@ -1,0 +1,24 @@
+exporter:
+  source:
+    url: https://schema-registry-xxxxx.byoc.prd.cloud.redpanda.com:30081
+      #    ssl.key.location: client.key
+      #ssl.certificate.location: client.cert
+      #ssl.ca.location: ca.cert
+    # basic.auth.user.info: username:password
+  options:
+    exclude.deleted.versions: false # Mandatory
+    exclude.deleted.subjects: false # Mandatory
+    logfile: /app/logs/export.log # Mandatory
+
+schemas: /app/data/exported-schemas.txt # Mandatory
+
+importer:
+  target:
+    bootstrap_servers: redpanda:19092 # Mandatory
+      #security_protocol: SASL_SSL
+      #sasl_mechanism: SCRAM-SHA-256
+      #sasl_plain_username: username
+      #sasl_plain_password: password
+  options:
+    topic: _schemas # Mandatory
+    logfile: /app/logs/import.log # Mandatory
