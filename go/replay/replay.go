@@ -68,7 +68,7 @@ func main() {
 	for ocfReader.Scan() {
 		record, err := ocfReader.Read()
 		if err != nil {
-			fmt.Printf("Error reading OCF file: %+v", err)
+			fmt.Printf("Error reading OCF file: %+v\n", err)
 			continue
 		}
 
@@ -82,7 +82,7 @@ func main() {
 			panic("Unable to get message key")
 		}
 
-		fmt.Printf("Message Key: %s", messageKey)
+		fmt.Printf("Message Key: %s\n", messageKey)
 
 		hdr := encodeBuffer(destinationSchemaIDInt)
 		value, err := codec.BinaryFromNative(hdr, record)
@@ -251,7 +251,7 @@ func submitRecords(ctx context.Context, client *kgo.Client, kafkaRecords []*kgo.
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
-	fmt.Printf("produced %d Kafka records", len(kafkaRecords))
+	fmt.Printf("produced %d Kafka records\n", len(kafkaRecords))
 	return nil
 }
 
