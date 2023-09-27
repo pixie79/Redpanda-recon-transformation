@@ -50,14 +50,12 @@ func init() {
 		set         bool
 	)
 
-	LogLevel = GetEnvDefault("LOG_LEVEL", "INFO")
+	inputTopic = getEnvOrDie("INPUT_TOPIC")
 
-	inputTopic = GetEnvOrDie("INPUT_TOPIC")
-
-	destinationSchemaID = GetEnvOrDie("DESTINATION_SCHEMA_ID")
+	destinationSchemaID = getEnvOrDie("DESTINATION_SCHEMA_ID")
 
 	destinationSchemaIDInt, err = strconv.Atoi(destinationSchemaID)
-	MaybeDie(err, fmt.Sprintf("DESTINATION_SCHEMA_ID not an integer: %s", destinationSchemaID))
+	handleError(err, fmt.Sprintf("DESTINATION_SCHEMA_ID not an integer: %s", destinationSchemaID))
 
 	topicPrefix, set = os.LookupEnv("TOPIC_PREFIX")
 	if !set {
@@ -66,9 +64,9 @@ func init() {
 		inputTopicStripped = strings.TrimPrefix(inputTopic, topicPrefix)
 	}
 
-	destinationSchema := GetSchema(destinationSchemaID)
+	destinationSchema := getSchema(destinationSchemaID)
 	destinationCodec, err = avro.NewCodec(destinationSchema)
-	MaybeDie(err, "Error creating Avro codec")
+	handleError(err, "Error creating Avro codec")
 }
 
 // main is the entry point of the program.
@@ -77,29 +75,29 @@ func init() {
 // It does not have any parameters.
 // It does not return any values.
 func main() {
-	Print("INFO", "Running transformer")
+	fmt.Printf("Running transformer\n")
 	redpanda.OnRecordWritten(toAvro)
 }
 
 func toAvro(e redpanda.WriteEvent) ([]redpanda.Record, error) {
 	rawEvent, err := json.Marshal(e.Record().Value)
-	MaybeDie(err, "unable to parse raw event")
-	Print("DEBUG", fmt.Sprintf("Raw Event %s", rawEvent))
+	handleError(err, "unable to parse raw event")
+	fmt.Printf("Raw Event %s\n", rawEvent)
 
 	sourceSchemaID, err := sr.ExtractID(e.Record().Value)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceSchema := GetSchema(fmt.Sprintf("%d", sourceSchemaID))
-	nestedMap := DecodeAvro(sourceSchema, rawEvent)
+	sourceSchema := getSchema(fmt.Sprintf("%d", sourceSchemaID))
+	nestedMap := decodeAvro(sourceSchema, rawEvent)
 
 	messageKey, outboxPublishedDate, ok := getValues(nestedMap)
 	if !ok {
-		Die("Unable to get message key")
+		panic("Unable to get message key")
 	}
 
-	hdr := EncodedBuffer(destinationSchemaIDInt)
+	hdr := encodeBuffer(destinationSchemaIDInt)
 
 	encoded, err := destinationCodec.BinaryFromNative(hdr, map[string]interface{}{
 		"topic":                 inputTopicStripped,
@@ -107,15 +105,15 @@ func toAvro(e redpanda.WriteEvent) ([]redpanda.Record, error) {
 		"outbox_published_date": outboxPublishedDate,
 	})
 
-	Print("DEBUG", fmt.Sprintf("Data: %v", encoded))
-	Print("DEBUG", fmt.Sprintf("Data: %s", string(encoded)))
+	fmt.Printf("Data: %v\n", encoded)
+	fmt.Printf("Data: %s\n", string(encoded))
 
 	record := redpanda.Record{
 		Key:   e.Record().Key,
 		Value: encoded,
 	}
 
-	Print("DEBUG", fmt.Sprintf("Record: %+v", record))
+	fmt.Printf("Record: %+v\n", record)
 	return []redpanda.Record{record}, nil
 }
 
@@ -149,12 +147,6 @@ func getValues(nestedMap map[string]interface{}) (messageKey string, outboxPubli
 	return "", -1, false
 }
 
-// GetSchemaIdFromPayload returns the schema id from the payload
-func GetSchemaIdFromPayload(msg []byte) int {
-	schemaID := binary.BigEndian.Uint32(msg[1:5])
-	return int(schemaID)
-}
-
 // decodeAvro decodes an Avro event using the provided schema and returns a nested map[string]interface{}.
 //
 // Parameters:
@@ -163,49 +155,70 @@ func GetSchemaIdFromPayload(msg []byte) int {
 //
 // Returns:
 // - nestedMap: The decoded event as a nested map[string]interface{}.
-func DecodeAvro(schema string, event []byte) map[string]interface{} {
+func decodeAvro(schema string, event []byte) map[string]interface{} {
 	sourceCodec, err := avro.NewCodec(schema)
-	MaybeDie(err, "Error creating Avro codec")
+	handleError(err, "Error creating Avro codec")
 
-	strEvent := strings.Replace(string(event), "\"", "", -1)
-	newEvent, err := B64DecodeMsg(strEvent, 5)
-	MaybeDie(err, "Error decoding base64")
-	native, _, err := sourceCodec.NativeFromBinary(newEvent)
-	MaybeDie(err, "Error creating native from binary")
+	eventStr := strings.Replace(string(event), "\"", "", -1)
+	decodedEvent, err := b64DecodeMsg(eventStr, 5)
+	handleError(err, "Error decoding base64")
+
+	native, _, err := sourceCodec.NativeFromBinary(decodedEvent)
+	handleError(err, "Error creating native from binary")
+
 	nestedMap, ok := native.(map[string]interface{})
 	if !ok {
-		Die("Unable to convert native to map[string]interface{}")
+		panic("Unable to convert native to map[string]interface{}")
 	}
+
 	return nestedMap
 }
 
-// GetEnvDefault retrieves the value of the environment variable specified by the key.
-// If the environment variable does not exist, it returns the default value.
+// getEnvDefault returns the value of the environment variable associated with the provided key.
+// If the environment variable does not exist, it returns the provided default value.
 //
 // Parameters:
-// - key: the name of the environment variable to retrieve.
-// - defaultVal: the value to return if the environment variable does not exist.
+// - key: the key of the environment variable to retrieve.
+// - defaultVal: the default value to return if the environment variable does not exist.
 //
-// Return:
+// Return type:
 // - string: the value of the environment variable or the default value.
-func GetEnvDefault(key string, defaultVal string) string {
-	if value, exists := os.LookupEnv(key); exists {
+func getEnvDefault(key, defaultVal string) string {
+	value, exists := os.LookupEnv(key)
+	if exists {
 		return value
 	}
 	return defaultVal
 }
 
-// EncodedBuffer returns the encoded buffer of an integer.
+// getEnvOrDie retrieves the value of an environment variable given its key and returns it.
+// If the environment variable does not exist, the function logs a fatal error and exits.
 //
-// It takes an integer as input and returns a byte slice that represents the encoded buffer.
-func EncodedBuffer(schemaId int) []byte {
-	byteArray := make([]byte, 4)
-	binary.BigEndian.PutUint32(byteArray, uint32(schemaId))
-	hdr := append([]byte{0}, byteArray...)
-	return hdr
+// Parameters:
+// - key: the key of the environment variable to retrieve.
+//
+// Return:
+// - string: the value of the environment variable.
+func getEnvOrDie(key string) string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		panic(fmt.Sprintf("%s: environment variable not set", key))
+	}
+	return value
 }
 
-// B64DecodeMsg decodes a base64 encoded key and returns a subset of the key starting from the specified offset.
+// encodeBuffer encodes the given schemaID into a byte array and returns the resulting header.
+//
+// The schemaID parameter is an integer representing the ID of the schema to be encoded.
+// The function returns a byte array that represents the header, including the schemaID.
+func encodeBuffer(schemaID int) []byte {
+	byteArray := make([]byte, 4)
+	binary.BigEndian.PutUint32(byteArray, uint32(schemaID))
+	header := append([]byte{0}, byteArray...)
+	return header
+}
+
+// b64DecodeMsg decodes a base64 encoded key and returns a subset of the key starting from the specified offset.
 //
 // Parameters:
 //   - b64Key: The base64 encoded key to be decoded.
@@ -214,7 +227,7 @@ func EncodedBuffer(schemaId int) []byte {
 // Returns:
 //   - []byte: The subset of the key starting from the specified offset.
 //   - error: An error if the decoding or subset operation fails.
-func B64DecodeMsg(b64Key string, offsetF ...int) ([]byte, error) {
+func b64DecodeMsg(b64Key string, offsetF ...int) ([]byte, error) {
 	offset := 7
 	if len(offsetF) > 0 {
 		offset = offsetF[0]
@@ -229,68 +242,31 @@ func B64DecodeMsg(b64Key string, offsetF ...int) ([]byte, error) {
 	return result, nil
 }
 
-// Die exits the program after logging an error message.
+// handleError handles the given error and logs a fatal message.
 //
-// It takes a message as a parameter and does not return anything.
-func Die(msg string) {
-	panic(msg)
-}
-
-// MaybeDie is a function that checks if an error exists and calls the Die function with a formatted error message if it does.
+// It takes two parameters:
+// - err: the error to be handled
+// - message: the message to be logged along with the error
 //
-// Parameters:
-// - err: the error to check.
-// - msg: the message to include in the error message.
-func MaybeDie(err error, msg string) {
+// This function does not return any value.
+func handleError(err error, message string) {
 	if err != nil {
-		Die(fmt.Sprintf("%s: %+v", msg, err))
+		panic(fmt.Sprintf("%s: %+v", message, err))
 	}
 }
 
-// GetEnvOrDie returns the value of the specified environment variable or exits the program.
-//
-// It takes a key string as a parameter and returns a string value.
-func GetEnvOrDie(key string) string {
-	value, set := os.LookupEnv(key)
-	if !set {
-		Die(fmt.Sprintf("%s: environment variable not set", key))
-	}
-	return value
-}
-
-// GetSchema retrieves the schema with the given ID from the specified URL.
+// getSchema retrieves the schema with the given ID from the specified URL.
 //
 // Parameters:
 // - id: The ID of the schema (as a string).
-// - url: The URL of the Schema Registry.
 //
 // Returns:
 // - The retrieved schema (as a string).
-func GetSchema(id string) string {
-	registry := sr.NewClient()
-	schemaIdInt, err := strconv.Atoi(id)
-	Print("DEBUG", fmt.Sprintf("Schema ID: %s", id))
-	MaybeDie(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", id))
-	schema, err := registry.LookupSchemaById(schemaIdInt)
-	MaybeDie(err, fmt.Sprintf("Unable to retrieve schema for ID: %s", id))
+func getSchema(id string) string {
+	client := sr.NewClient()
+	schemaID, err := strconv.Atoi(id)
+	handleError(err, fmt.Sprintf("SCHEMA_ID not an integer: %s", id))
+	schema, err := client.LookupSchemaById(schemaID)
+	handleError(err, fmt.Sprintf("Unable to retrieve schema for ID: %s", id))
 	return schema.Schema
-}
-
-// Print prints the given message with the specified log level.
-//
-// Parameters:
-//   - level: the log level to use (e.g. "INFO", "ERROR").
-//   - msg: the message to be printed.
-func Print(level, msg string) {
-	switch strings.ToUpper(LogLevel) {
-	case "WARNING":
-		fmt.Printf("%s: %s\n", strings.ToUpper(level), msg)
-	case "ERROR":
-		fmt.Printf("%s: %s\n", strings.ToUpper(level), msg)
-	case "DEBUG":
-		fmt.Printf("%s: %s\n", strings.ToUpper(level), msg)
-	case "INFO":
-		fmt.Printf("%s: %s\n", strings.ToUpper(level), msg)
-	}
-
 }
