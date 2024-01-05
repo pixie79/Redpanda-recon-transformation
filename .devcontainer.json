@@ -1,0 +1,19 @@
+{
+    "image": "ghcr.io/pixie79/devcontainer:latest",
+    "containerEnv": {
+        "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
+        "GITHUB_USER": "${localEnv:GITHUB_USER}"
+      },
+      "customizations": {
+        "codespaces": {
+          "repositories": {
+            "pixie79/devcontainer": {
+              "permissions": "read-all"
+            },
+            "pixie79/Redpanda-recon-transformation": {
+              "permissions": "write-all"
+            }
+          }
+        }
+      }
+}

@@ -3,6 +3,4 @@ go/replay/replay
 go/*/*.avro
 go/*/*.env
 go/review/*
-flink/logs/*
-flink/jars/*
 schema_migration/data/*
